@@ -1,10 +1,10 @@
-# IAM302 Malware Prevention Snort Lab
+# C2 Threat Defense Platform
 
-A safe, reproducible C2/malware defense lab for a small-enterprise network model. The lab forces a Windows endpoint through an Ubuntu gateway, redirects unsafe Internet-like traffic to INetSim/Fake C2, detects activity with Snort IDS and Zeek, blocks selected flows with Snort IPS through NFQUEUE, and uses a Python engine to generate Snort rules from Zeek telemetry.
+A safe, reproducible C2/malware defense platform for a small-enterprise network model. The platform forces a Windows endpoint through an Ubuntu gateway, redirects unsafe Internet-like traffic to INetSim/Fake C2, detects activity with Snort IDS and Zeek, blocks selected flows with Snort IPS through NFQUEUE, and uses a Python engine to generate Snort rules from Zeek telemetry.
 
-> This repository is a sanitized lab framework. It does not include private logs, packet captures, malware samples, raw runtime state, or the original DOCX report.
+> This repository is a sanitized defensive platform framework. It does not include private logs, packet captures, malware samples, raw runtime state, or the original DOCX report.
 
-## What This Lab Demonstrates
+## What This Platform Demonstrates
 
 - Ubuntu as gateway, firewall, router, NAT/DNAT point, Snort IDS/IPS host, Zeek sensor, and Python automation runner.
 - Windows client traffic forced through the gateway, with no direct Internet path.
@@ -16,7 +16,7 @@ A safe, reproducible C2/malware defense lab for a small-enterprise network model
 - Zeek visibility for HTTP/DNS/TLS/connection metadata, including pre-L7 notices for blocked high-port C2 attempts.
 - Python auto-rule generation from Zeek logs for "observe first, block next" workflows.
 
-## Lab Roles
+## System Roles
 
 | Role | Default IP | Purpose |
 | --- | --- | --- |
@@ -28,15 +28,15 @@ A safe, reproducible C2/malware defense lab for a small-enterprise network model
 ## Quick Start
 
 ```bash
-git clone https://github.com/ThanhTuanjk/iam302-malware-prevention-snort-lab.git
-cd iam302-malware-prevention-snort-lab
+git clone https://github.com/ThanhTuanjk/c2-threat-defense-platform.git
+cd c2-threat-defense-platform
 cp .env.example .env
 # Edit .env to match your VM interfaces and IP addresses.
 sudo bash install/check_prereqs.sh
 sudo bash install/deploy_ubuntu_gateway.sh
 ```
 
-Start the main lab terminals on Ubuntu:
+Start the main platform terminals on Ubuntu:
 
 ```bash
 sudo bash ~/c2-defense-lab/automation/start_zeek_python.sh
@@ -76,7 +76,7 @@ Test-NetConnection 10.10.10.20 -Port 56003
 
 ```text
 automation/     Start scripts and Python auto-rule engine
-config/         Snort and Zeek configuration used by the lab
+config/         Snort and Zeek configuration used by the platform
 docs/           Architecture, setup, runbooks, test plan
 examples/       Safe test commands and expected evidence
 install/        Deployment helpers for the Ubuntu gateway
@@ -87,5 +87,5 @@ tools/          Pretty log viewers and Snort rule rebuild tool
 
 ## Safety Boundary
 
-This lab is designed for controlled defensive education. Do not run real malware outside an isolated VM network. Do not publish runtime logs or packet captures without sanitizing them first.
+This platform is designed for controlled defensive education and enterprise-style validation. Do not run real malware outside an isolated VM network. Do not publish runtime logs or packet captures without sanitizing them first.
 

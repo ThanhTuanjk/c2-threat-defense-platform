@@ -1,6 +1,6 @@
 # Architecture
 
-The lab uses a four-role model:
+The platform uses a four-role model:
 
 ```text
 Windows Client
@@ -22,7 +22,7 @@ Windows Wazuh Agent -> Ubuntu Gateway exception -> Wazuh Server
 
 ## Control Points
 
-- `iptables` owns traffic steering and lab isolation.
+- `iptables` owns traffic steering and environment isolation.
 - Snort IDS listens passively and alerts only.
 - Snort IPS runs inline with NFQUEUE and can block/drop.
 - Zeek records protocol and connection context.
@@ -41,5 +41,5 @@ IDS evidence proves detection. IPS evidence proves prevention. A valid IPS block
 
 ## Zeek and Pre-L7 Blocks
 
-When Snort drops a TCP SYN before the TCP session is established, Zeek cannot produce an HTTP record because no HTTP exists yet. The lab Zeek policy adds a `LabPreL7::Suspicious_Connection_Attempt` notice for selected high-risk C2 ports. That notice proves Zeek observed the real ingress attempt on `ens33`; Snort remains authoritative for the drop verdict.
+When Snort drops a TCP SYN before the TCP session is established, Zeek cannot produce an HTTP record because no HTTP exists yet. The platform Zeek policy adds a `LabPreL7::Suspicious_Connection_Attempt` notice for selected high-risk C2 ports. That notice proves Zeek observed the real ingress attempt on `ens33`; Snort remains authoritative for the drop verdict.
 

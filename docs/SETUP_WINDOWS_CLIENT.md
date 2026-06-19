@@ -4,7 +4,7 @@ Windows represents the internal endpoint that may run benign tests or controlled
 
 ## Network
 
-Configure the Windows lab adapter:
+Configure the Windows analysis adapter:
 
 ```text
 IP address: 192.168.100.20

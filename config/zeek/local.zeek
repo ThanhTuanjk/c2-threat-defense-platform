@@ -120,7 +120,7 @@ export {
         Suspicious_Connection_Attempt
     };
 
-    # Change these defaults if your lab addressing differs.
+    # Change these defaults if your deployment addressing differs.
     const lab_client: addr = 192.168.100.20 &redef;
     const fake_c2: addr = 10.10.10.20 &redef;
     const c2_high_ports: set[port] = {

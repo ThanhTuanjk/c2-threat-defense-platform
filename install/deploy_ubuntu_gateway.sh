@@ -47,7 +47,7 @@ fi
 
 /usr/local/bin/rebuild_snort_rule_sets.sh
 
-echo "[OK] Ubuntu gateway lab files deployed to $LAB_DIR"
+echo "[OK] Ubuntu gateway platform files deployed to $LAB_DIR"
 echo "[NEXT] sudo bash $LAB_DIR/automation/start_zeek_python.sh"
 echo "[NEXT] sudo bash $LAB_DIR/automation/start_snort_ips.sh"
 

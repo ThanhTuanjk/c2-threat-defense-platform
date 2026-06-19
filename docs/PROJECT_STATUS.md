@@ -12,5 +12,5 @@ Known limitations:
 
 - Wazuh Active Response is documented as experimental until Sysmon/Wazuh trigger coverage is verified end to end.
 - Raw IOC URL/IP/domain feeds are not included in this repository because they may contain live malicious infrastructure and redistribution concerns.
-- Lab IPs are defaults. Edit `.env`, rules, and Zeek constants if your topology differs.
+- Default IPs are examples. Edit `.env`, rules, and Zeek constants if your topology differs.
 

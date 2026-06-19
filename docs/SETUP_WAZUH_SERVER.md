@@ -19,5 +19,5 @@ On Windows, verify the Wazuh Agent is enrolled and sending logs. On the Wazuh Se
 
 ## Active Response Status
 
-Active Response kill-process logic is a future/experimental layer in this lab. Treat it as not production-ready until Sysmon Event ID 1/3/22 coverage is verified and the Wazuh rule reliably triggers on the intended test event.
+Active Response kill-process logic is a future/experimental layer in this platform. Treat it as not production-ready until Sysmon Event ID 1/3/22 coverage is verified and the Wazuh rule reliably triggers on the intended test event.
 

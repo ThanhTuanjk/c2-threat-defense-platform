@@ -1,6 +1,6 @@
 # Security Policy
 
-This repository is a defensive malware/C2 lab framework. It intentionally contains detection logic, Snort rules, and test commands, but it must not contain malware samples, credentials, private packet captures, or private runtime logs.
+This repository is a defensive malware/C2 platform framework. It intentionally contains detection logic, Snort rules, and test commands, but it must not contain malware samples, credentials, private packet captures, or private runtime logs.
 
 ## Do Not Publish
 
@@ -13,5 +13,5 @@ This repository is a defensive malware/C2 lab framework. It intentionally contai
 
 ## Safe Reporting
 
-If you find a safety issue in this lab, open a private advisory or contact the maintainer before publishing exploit details.
+If you find a safety issue in this platform, open a private advisory or contact the maintainer before publishing exploit details.
 

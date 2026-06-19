@@ -5,8 +5,8 @@ Ubuntu is the central control point. It runs the firewall, Snort IDS/IPS, Zeek, 
 ## 1. Clone and Configure
 
 ```bash
-git clone https://github.com/ThanhTuanjk/iam302-malware-prevention-snort-lab.git
-cd iam302-malware-prevention-snort-lab
+git clone https://github.com/ThanhTuanjk/c2-threat-defense-platform.git
+cd c2-threat-defense-platform
 cp .env.example .env
 nano .env
 ```
@@ -21,7 +21,7 @@ sudo bash install/check_prereqs.sh
 
 The helper checks for Snort, Zeek, Python, iptables, and required paths. It does not compile Snort or Zeek for you.
 
-## 3. Deploy Lab Files
+## 3. Deploy Platform Files
 
 ```bash
 sudo bash install/deploy_ubuntu_gateway.sh
