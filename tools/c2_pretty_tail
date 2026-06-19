@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+import os
+import re
+import sys
+import time
+import math
+from pathlib import Path
+from datetime import datetime
+
+SHOWN = set()
+
+def lab_user_home():
+    u = os.environ.get("SUDO_USER") or os.environ.get("USER") or "ubuntu"
+    if u == "root":
+        u = "ubuntu"
+    return Path(f"/home/{u}")
+
+def default_zeek_dir():
+    if len(sys.argv) > 1:
+        return Path(sys.argv[1])
+    return lab_user_home() / "c2-defense-lab" / "zeek" / "day6_auto_response"
+
+ZEEK_DIR = default_zeek_dir()
+
+def now_str(ts=None):
+    try:
+        if ts and ts != "-":
+            return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        pass
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def clean(x):
+    if x is None:
+        return "-"
+    x = str(x).strip()
+    return x if x else "-"
+
+def entropy(s):
+    if not s:
+        return 0.0
+    freq = {}
+    for c in s:
+        freq[c] = freq.get(c, 0) + 1
+    total = len(s)
+    return -sum((n / total) * math.log2(n / total) for n in freq.values())
+
+def is_encoded_like_label(host):
+    labels = host.split(".")
+    for lb in labels:
+        if len(lb) >= 24 and re.fullmatch(r"[A-Za-z0-9_-]+", lb or ""):
+            if entropy(lb) >= 3.5:
+                return True
+    return False
+
+def is_long_or_weird_host(host):
+    labels = host.split(".")
+    if len(host) >= 45:
+        return True
+    if any(len(lb) >= 30 for lb in labels):
+        return True
+    if is_encoded_like_label(host):
+        return True
+    return False
+
+def http_score(host, uri, ua):
+    score = 0
+    reasons = []
+
+    h = host.lower()
+    u = uri.lower()
+    a = ua.lower()
+
+    if is_long_or_weird_host(host):
+        score += 3
+        reasons.append("encoded_or_long_host")
+
+    for kw in ["c2", "bot", "malware", "payload", "auto-lab", "evil", "beacon"]:
+        if kw in h:
+            score += 2
+            reasons.append(f"host:{kw}")
+
+    for kw in ["beacon", "gate", "callback", "checkin", "cmd", "command", "task", "sync", "poll", "loader", "payload", "update"]:
+        if kw in u:
+            score += 2
+            reasons.append(f"uri:{kw}")
+
+    for kw in ["powershell", "python-requests", "curl", "wget", "go-http-client", "winhttp"]:
+        if kw in a:
+            score += 1
+            reasons.append(f"ua:{kw}")
+
+    return score, reasons
+
+def box(title, rows):
+    w = 104
+    print()
+    print("=" * w)
+    print(title)
+    print("-" * w)
+    for k, v in rows:
+        k = str(k)[:22]
+        v = str(v)
+        prefix = f"{k:<22}: "
+        max_v = w - len(prefix)
+        if len(v) <= max_v:
+            print(prefix + v)
+        else:
+            print(prefix + v[:max_v])
+            rest = v[max_v:]
+            while rest:
+                print(" " * len(prefix) + rest[:max_v])
+                rest = rest[max_v:]
+    print("=" * w, flush=True)
+
+class ZeekTail:
+    def __init__(self, path, kind):
+        self.path = Path(path)
+        self.kind = kind
+        self.f = None
+        self.fields = []
+        self.pos = 0
+
+    def open_if_needed(self):
+        if self.f is not None:
+            try:
+                if self.path.exists() and self.path.stat().st_size < self.f.tell():
+                    self.f.close()
+                    self.f = None
+                    self.fields = []
+            except Exception:
+                self.f = None
+
+        if self.f is None and self.path.exists():
+            self.f = open(self.path, "r", errors="ignore")
+            self.pos = 0
+
+    def poll(self):
+        self.open_if_needed()
+        if self.f is None:
+            return []
+
+        events = []
+
+        while True:
+            line = self.f.readline()
+            if not line:
+                break
+
+            line = line.rstrip("\n")
+            if not line:
+                continue
+
+            if line.startswith("#fields"):
+                self.fields = line.split("\t")[1:]
+                continue
+
+            if line.startswith("#"):
+                continue
+
+            if not self.fields:
+                continue
+
+            parts = line.split("\t")
+            if len(parts) < len(self.fields):
+                parts += ["-"] * (len(self.fields) - len(parts))
+
+            rec = dict(zip(self.fields, parts))
+            events.append(rec)
+
+        return events
+
+def handle_http(rec):
+    ts = rec.get("ts", "-")
+    uid = rec.get("uid", "-")
+    src = rec.get("id.orig_h", "-")
+    dst = rec.get("id.resp_h", "-")
+    dport = rec.get("id.resp_p", "80")
+    method = rec.get("method", "-")
+    host = rec.get("host", "-")
+    uri = rec.get("uri", "-")
+    ua = rec.get("user_agent", "-")
+    status = rec.get("status_code", "-")
+
+    key = f"http|{uid}|{src}|{dst}|{host}|{uri}|{status}"
+    if key in SHOWN:
+        return
+    SHOWN.add(key)
+
+    score, reasons = http_score(host, uri, ua)
+    no_response = status in ["-", "", None]
+
+    if no_response and score >= 3:
+        title = "ZEEK HTTP REQUEST WITHOUT RESPONSE - POSSIBLE IPS BLOCK"
+        event_type = "HTTP request observed, no completed response"
+        severity = "HIGH"
+        action = "REQUEST OBSERVED / NO HTTP RESPONSE"
+        suspected = "Suspicious C2-like HTTP request"
+        mitre = "T1071.001 Web Protocols"
+        result = "Zeek saw the request, but no HTTP response was completed. Correlate with Snort BLOCK and Windows timeout: IPS likely blocked it."
+    elif no_response:
+        title = "ZEEK HTTP REQUEST WITHOUT RESPONSE"
+        event_type = "HTTP request observed, no completed response"
+        severity = "MEDIUM"
+        action = "REQUEST OBSERVED / NO HTTP RESPONSE"
+        suspected = "Request incomplete or interrupted"
+        mitre = "T1071.001 Web Protocols"
+        result = "Zeek observed the request, but no HTTP response was completed. Check Snort IPS or network timeout."
+    elif score >= 3:
+        title = "ZEEK HTTP SUSPICIOUS TRAFFIC"
+        event_type = "Suspicious HTTP request"
+        severity = "HIGH"
+        action = "OBSERVE / POSSIBLE AUTO-RULE"
+        suspected = "Suspicious C2 / encoded host behavior"
+        mitre = "T1071.001 Web Protocols"
+        result = "Traffic completed, but Zeek marked it suspicious. Python may generate an auto-rule if criteria match."
+    else:
+        title = "ZEEK HTTP TRAFFIC"
+        event_type = "Normal HTTP request"
+        severity = "INFO"
+        action = "ALLOW / PASS"
+        suspected = "No malware behavior observed"
+        mitre = "None"
+        result = "HTTP request and response completed normally."
+
+    rows = [
+        ("Time", now_str(ts)),
+        ("Event type", event_type),
+        ("Severity", severity),
+        ("Action", action),
+        ("Source IP", src),
+        ("Destination", dst),
+        ("Destination port", dport),
+        ("Host", host),
+        ("URI", uri),
+        ("Method", method),
+        ("HTTP Status", status),
+        ("User-Agent", ua),
+        ("Suspicion score", score),
+        ("Reasons", ",".join(reasons) if reasons else "-"),
+        ("Suspected type", suspected),
+        ("MITRE mapping", mitre),
+        ("Result", result),
+    ]
+
+    box(title, rows)
+
+def dns_score(query):
+    q = query.lower()
+    score = 0
+    reasons = []
+
+    if len(query) >= 45:
+        score += 2
+        reasons.append("long_domain")
+
+    if is_encoded_like_label(query):
+        score += 3
+        reasons.append("encoded_like_label")
+
+    for kw in ["c2", "bot", "malware", "payload", "beacon", "evil", "auto-lab"]:
+        if kw in q:
+            score += 2
+            reasons.append(f"keyword:{kw}")
+
+    return score, reasons
+
+def handle_dns(rec):
+    ts = rec.get("ts", "-")
+    uid = rec.get("uid", "-")
+    src = rec.get("id.orig_h", "-")
+    query = rec.get("query", "-")
+    rcode = rec.get("rcode_name", "-")
+    answers = rec.get("answers", "-")
+
+    key = f"dns|{uid}|{src}|{query}|{rcode}|{answers}"
+    if key in SHOWN:
+        return
+    SHOWN.add(key)
+
+    score, reasons = dns_score(query)
+
+    if score >= 3:
+        title = "ZEEK DNS SUSPICIOUS TRAFFIC"
+        event_type = "Suspicious DNS query"
+        severity = "MEDIUM"
+        action = "DNS OBSERVED / POSSIBLE C2 INDICATOR"
+        suspected = "Possible DNS C2 / encoded domain"
+        mitre = "T1071.004 DNS / T1568 Dynamic Resolution"
+        result = "Suspicious DNS query observed by Zeek. Use with Snort/Python evidence for correlation."
+    else:
+        title = "ZEEK DNS TRAFFIC"
+        event_type = "DNS Query Observed"
+        severity = "INFO"
+        action = "REQUEST OBSERVED / NO SENSOR BLOCK"
+        suspected = "No malware behavior observed"
+        mitre = "T1071.004 DNS / T1568 Dynamic Resolution"
+        result = "DNS request and response observed by Zeek."
+
+    rows = [
+        ("Time", now_str(ts)),
+        ("Event type", event_type),
+        ("Severity", severity),
+        ("Action", action),
+        ("Source IP", src),
+        ("Query", query),
+        ("DNS response", rcode),
+        ("Answers", answers),
+        ("Suspicion score", score),
+        ("Reasons", ",".join(reasons) if reasons else "-"),
+        ("Suspected type", suspected),
+        ("MITRE mapping", mitre),
+        ("Result", result),
+    ]
+
+    box(title, rows)
+
+def handle_notice(rec):
+    note = rec.get("note", "-")
+    if note != "LabPreL7::Suspicious_Connection_Attempt":
+        return
+
+    ts = rec.get("ts", "-")
+    uid = rec.get("uid", "-")
+    src = rec.get("src", rec.get("id.orig_h", "-"))
+    dst = rec.get("dst", rec.get("id.resp_h", "-"))
+    dport = rec.get("p", rec.get("id.resp_p", "-"))
+    msg = rec.get("msg", "-")
+
+    key = f"notice|{uid}|{ts}|{src}|{dst}|{dport}|{note}"
+    if key in SHOWN:
+        return
+    SHOWN.add(key)
+
+    rows = [
+        ("Time", now_str(ts)),
+        ("Event type", "Suspicious TCP connection attempt"),
+        ("Severity", "HIGH"),
+        ("Action", "OBSERVED BY ZEEK / CHECK SNORT VERDICT"),
+        ("Source IP", src),
+        ("Destination", dst),
+        ("Destination port", dport),
+        ("Zeek UID", uid),
+        ("Evidence", msg),
+        ("Layer-7 status", "Not established yet"),
+        ("MITRE mapping", "T1071 possible"),
+        ("Result", "Zeek captured the real ingress connection attempt on ens33. Match this flow and time with Snort to confirm BLOCK/DROP."),
+    ]
+
+    box("ZEEK PRE-L7 SUSPICIOUS CONNECTION OBSERVED", rows)
+
+def main():
+    http_tail = ZeekTail(ZEEK_DIR / "http.log", "http")
+    dns_tail = ZeekTail(ZEEK_DIR / "dns.log", "dns")
+    notice_tail = ZeekTail(ZEEK_DIR / "notice.log", "notice")
+
+    print(f"[ZEEK VIEW] Watching Zeek directory: {ZEEK_DIR}", flush=True)
+    print("[ZEEK VIEW] Pre-L7 C2 attempts come from Zeek notice.log; Snort remains authoritative for DROP verdicts.", flush=True)
+    print("[ZEEK VIEW] HTTP Status '-' means request was seen but no completed HTTP response was observed.", flush=True)
+    print("[ZEEK VIEW] Correlate 'NO HTTP RESPONSE' with Snort BLOCK and Windows timeout to prove IPS blocking.", flush=True)
+
+    while True:
+        for rec in http_tail.poll():
+            handle_http(rec)
+
+        for rec in dns_tail.poll():
+            handle_dns(rec)
+
+        for rec in notice_tail.poll():
+            handle_notice(rec)
+
+        time.sleep(0.2)
+
+if __name__ == "__main__":
+    main()

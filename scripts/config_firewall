@@ -1,0 +1,217 @@
+#!/bin/bash
+
+# =========================================================
+# FULL C2 DEFENSE LAB NETWORK SCRIPT
+#
+# Mode:
+#   observe = Zeek/INetSim observe only, no Snort IPS NFQUEUE
+#   ips     = selected INetSim traffic goes to Snort IPS NFQUEUE
+#
+# Main logic:
+# - Windows normal traffic -> INetSim 10.10.10.20
+# - Windows Wazuh Agent traffic -> Wazuh Server ${WAZUH_SERVER_IP}:1514/1515 only
+# - No general Internet leak
+# =========================================================
+
+MODE="${1:-observe}"
+
+ENV_FILE="${ENV_FILE:-$(cd "$(dirname "$0")/.." && pwd)/.env}"
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+fi
+
+
+LAN_IF="${LAN_IF:-ens33}"
+WAN_IF="${WAN_IF:-ens37}"
+
+LAN_NET="${LAN_NET:-192.168.100.0/24}"
+LAN_CLIENT="${LAN_CLIENT:-192.168.100.20}"
+
+INETSIM_IP="${INETSIM_IP:-10.10.10.20}"
+
+# Wazuh Server on real LAN / friend machine
+WAZUH_SERVER_IP="${WAZUH_SERVER_IP:-10.10.20.20}"
+WAZUH_PORTS="${WAZUH_PORTS:-1514,1515}"
+
+NFQUEUE_NUM="${NFQUEUE_NUM:-0}"
+
+# In IPS mode, every non-Wazuh TCP/UDP flow from Windows is DNATed to INetSim
+# and then sent through Snort NFQUEUE. This prevents malware from bypassing IPS
+# simply by changing to a new high port.
+IPS_TCP_PORT_GROUPS=()
+IPS_UDP_PORTS="all"
+
+echo "[+] Mode: ${MODE}"
+echo "[+] LAN_IF=${LAN_IF}, WAN_IF=${WAN_IF}"
+echo "[+] LAN_CLIENT=${LAN_CLIENT}, INETSIM_IP=${INETSIM_IP}"
+echo "[+] WAZUH_SERVER_IP=${WAZUH_SERVER_IP}, WAZUH_PORTS=${WAZUH_PORTS}"
+
+WAZUH_OUT_IF="$(ip route get ${WAZUH_SERVER_IP} 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)"
+echo "[+] WAZUH_OUT_IF=${WAZUH_OUT_IF}"
+
+echo "[+] Enable IP forwarding"
+sysctl -w net.ipv4.ip_forward=1
+
+echo "[+] Disable rp_filter"
+sysctl -w net.ipv4.conf.all.rp_filter=0
+sysctl -w net.ipv4.conf.default.rp_filter=0
+sysctl -w net.ipv4.conf.${LAN_IF}.rp_filter=0
+sysctl -w net.ipv4.conf.${WAN_IF}.rp_filter=0
+
+if [ -n "${WAZUH_OUT_IF}" ]; then
+    sysctl -w net.ipv4.conf.${WAZUH_OUT_IF}.rp_filter=0 2>/dev/null || true
+fi
+
+echo "[+] Flush lab rules"
+iptables -F FORWARD
+iptables -t nat -F PREROUTING
+iptables -t nat -F POSTROUTING
+
+echo "[+] Set FORWARD policy DROP"
+iptables -P FORWARD DROP
+
+# =========================================================
+# 0. Wazuh exception: do NOT redirect Wazuh Agent traffic to INetSim
+# =========================================================
+if [ -n "${WAZUH_SERVER_IP}" ] && [ "${WAZUH_SERVER_IP}" != "0.0.0.0" ]; then
+    echo "[+] Wazuh exception: Windows Agent can reach ${WAZUH_SERVER_IP}:${WAZUH_PORTS}"
+
+    iptables -t nat -A PREROUTING -i ${LAN_IF} -s ${LAN_CLIENT} -d ${WAZUH_SERVER_IP} -p tcp \
+    -m multiport --dports ${WAZUH_PORTS} \
+    -j RETURN
+fi
+
+# =========================================================
+# 1. Broad DNAT: redirect all other TCP/UDP from Windows to INetSim
+# =========================================================
+echo "[+] Redirect ALL TCP from Windows to INetSim"
+
+iptables -t nat -A PREROUTING -i ${LAN_IF} -s ${LAN_CLIENT} -p tcp \
+-j DNAT --to-destination ${INETSIM_IP}
+
+echo "[+] Redirect ALL UDP from Windows to INetSim"
+
+iptables -t nat -A PREROUTING -i ${LAN_IF} -s ${LAN_CLIENT} -p udp \
+-j DNAT --to-destination ${INETSIM_IP}
+
+# =========================================================
+# 2. IPS mode: selected INetSim ports go to Snort NFQUEUE
+# =========================================================
+if [ "${MODE}" = "ips" ]; then
+    echo "[+] IPS mode enabled: selected TCP/UDP ports go to NFQUEUE"
+
+    iptables -A FORWARD -i ${LAN_IF} -o ${WAN_IF} -s ${LAN_CLIENT} -d ${INETSIM_IP} -p tcp \
+    -j NFQUEUE --queue-num ${NFQUEUE_NUM}
+
+    iptables -A FORWARD -i ${WAN_IF} -o ${LAN_IF} -s ${INETSIM_IP} -d ${LAN_CLIENT} -p tcp \
+    -m conntrack --ctstate ESTABLISHED,RELATED \
+    -j NFQUEUE --queue-num ${NFQUEUE_NUM}
+
+    iptables -A FORWARD -i ${LAN_IF} -o ${WAN_IF} -s ${LAN_CLIENT} -d ${INETSIM_IP} -p udp \
+    -j NFQUEUE --queue-num ${NFQUEUE_NUM}
+
+    iptables -A FORWARD -i ${WAN_IF} -o ${LAN_IF} -s ${INETSIM_IP} -d ${LAN_CLIENT} -p udp \
+    -m conntrack --ctstate ESTABLISHED,RELATED \
+    -j NFQUEUE --queue-num ${NFQUEUE_NUM}
+fi
+
+# =========================================================
+# 2.5. Allow Wazuh Agent traffic to Wazuh Server only
+# =========================================================
+if [ -n "${WAZUH_SERVER_IP}" ] && [ "${WAZUH_SERVER_IP}" != "0.0.0.0" ] && [ -n "${WAZUH_OUT_IF}" ]; then
+    echo "[+] Allow Windows Wazuh Agent traffic to ${WAZUH_SERVER_IP} via ${WAZUH_OUT_IF}"
+
+    iptables -A FORWARD -i ${LAN_IF} -o ${WAZUH_OUT_IF} -s ${LAN_CLIENT} -d ${WAZUH_SERVER_IP} -p tcp \
+    -m multiport --dports ${WAZUH_PORTS} \
+    -j ACCEPT
+
+    iptables -A FORWARD -i ${WAZUH_OUT_IF} -o ${LAN_IF} -s ${WAZUH_SERVER_IP} -d ${LAN_CLIENT} -p tcp \
+    -m multiport --sports ${WAZUH_PORTS} \
+    -m conntrack --ctstate ESTABLISHED,RELATED \
+    -j ACCEPT
+
+    # ICMP only for testing ping. Remove later if not needed.
+    iptables -A FORWARD -i ${LAN_IF} -o ${WAZUH_OUT_IF} -s ${LAN_CLIENT} -d ${WAZUH_SERVER_IP} -p icmp \
+    -j ACCEPT
+
+    iptables -A FORWARD -i ${WAZUH_OUT_IF} -o ${LAN_IF} -s ${WAZUH_SERVER_IP} -d ${LAN_CLIENT} -p icmp \
+    -m conntrack --ctstate ESTABLISHED,RELATED \
+    -j ACCEPT
+fi
+
+# =========================================================
+# 3. Allow traffic only to INetSim
+# =========================================================
+echo "[+] Allow Windows traffic only to INetSim"
+
+iptables -A FORWARD -i ${LAN_IF} -o ${WAN_IF} -s ${LAN_CLIENT} -d ${INETSIM_IP} \
+-j ACCEPT
+
+echo "[+] Allow return traffic only from INetSim"
+
+iptables -A FORWARD -i ${WAN_IF} -o ${LAN_IF} -s ${INETSIM_IP} -d ${LAN_CLIENT} \
+-m conntrack --ctstate ESTABLISHED,RELATED \
+-j ACCEPT
+
+# =========================================================
+# 4. Log + Drop leak to real Internet
+# =========================================================
+echo "[+] Log and drop any traffic from Windows to non-INetSim destination"
+
+iptables -A FORWARD -i ${LAN_IF} -s ${LAN_CLIENT} \
+-m limit --limit 10/min \
+-j LOG --log-prefix "LAB-LEAK-DROP " --log-level 4
+
+iptables -A FORWARD -i ${LAN_IF} -s ${LAN_CLIENT} \
+-j DROP
+
+# =========================================================
+# 4.5. NAT Windows Wazuh Agent traffic only
+# =========================================================
+if [ -n "${WAZUH_SERVER_IP}" ] && [ "${WAZUH_SERVER_IP}" != "0.0.0.0" ] && [ -n "${WAZUH_OUT_IF}" ]; then
+    echo "[+] NAT Windows Wazuh Agent traffic to ${WAZUH_SERVER_IP} via ${WAZUH_OUT_IF}"
+
+    iptables -t nat -A POSTROUTING -s ${LAN_CLIENT} -d ${WAZUH_SERVER_IP} -o ${WAZUH_OUT_IF} \
+    -j MASQUERADE
+fi
+
+# =========================================================
+# 5. NAT Windows only to INetSim
+# =========================================================
+echo "[+] NAT Windows only to INetSim"
+
+iptables -t nat -A POSTROUTING -s ${LAN_CLIENT} -d ${INETSIM_IP} -o ${WAN_IF} \
+-j MASQUERADE
+
+# =========================================================
+# 6. Clear old connection tracking
+# =========================================================
+echo "[+] Clear old conntrack sessions from Windows if conntrack exists"
+
+if command -v conntrack >/dev/null 2>&1; then
+    conntrack -D -s ${LAN_CLIENT} 2>/dev/null || true
+    conntrack -D -d ${LAN_CLIENT} 2>/dev/null || true
+    conntrack -D -d ${WAZUH_SERVER_IP} 2>/dev/null || true
+else
+    echo "[!] conntrack command not found. Install with: sudo apt install -y conntrack"
+fi
+
+echo
+echo "[+] FORWARD rules"
+iptables -L FORWARD -v -n --line-numbers
+
+echo
+echo "[+] NAT PREROUTING rules"
+iptables -t nat -L PREROUTING -v -n --line-numbers
+
+echo
+echo "[+] NAT POSTROUTING rules"
+iptables -t nat -L POSTROUTING -v -n --line-numbers
+
+echo
+echo "[+] Done. Broad fake internet mode is active."
+echo "[+] INetSim still receives all non-Wazuh traffic."
+echo "[+] Wazuh exception only allows ${LAN_CLIENT} -> ${WAZUH_SERVER_IP}:${WAZUH_PORTS}"

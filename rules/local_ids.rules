@@ -1,0 +1,547 @@
+# =========================================================
+# LAB C2 IPS IDS-DETECT RULES - SNORT 3 VALID SYNTAX
+# Windows Client: 192.168.100.20
+# Fake C2 Server / INetSim: 10.10.10.20
+#
+# Purpose:
+# - Known C2-like behaviors are blocked immediately.
+# - Unknown behaviors are handled later by Zeek + Python auto rules.
+# =========================================================
+
+# ---------------------------------------------------------
+# 0. Visibility rule: alert HTTP traffic to Fake C2
+# ---------------------------------------------------------
+alert tcp 192.168.100.0/24 any -> 10.10.10.20 80 (
+    msg:"LAB-IDS OBSERVE HTTP traffic to Fake C2 IP";
+    flow:to_server,established;
+    sid:2100001;
+    rev:1;
+)
+
+# =========================================================
+# 1. Known C2 URI / check-in / beacon endpoints
+# =========================================================
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /gate.php";
+    flow:to_server,established;
+    http_uri;
+    content:"/gate.php",nocase;
+    sid:2100101;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /beacon.php";
+    flow:to_server,established;
+    http_uri;
+    content:"/beacon.php",nocase;
+    sid:2100102;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /checkin";
+    flow:to_server,established;
+    http_uri;
+    content:"/checkin",nocase;
+    sid:2100103;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /callback";
+    flow:to_server,established;
+    http_uri;
+    content:"/callback",nocase;
+    sid:2100104;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /connect";
+    flow:to_server,established;
+    http_uri;
+    content:"/connect",nocase;
+    sid:2100105;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /panel";
+    flow:to_server,established;
+    http_uri;
+    content:"/panel",nocase;
+    sid:2100106;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /task";
+    flow:to_server,established;
+    http_uri;
+    content:"/task",nocase;
+    sid:2100107;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /api/task";
+    flow:to_server,established;
+    http_uri;
+    content:"/api/task",nocase;
+    sid:2100108;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /api/checkin";
+    flow:to_server,established;
+    http_uri;
+    content:"/api/checkin",nocase;
+    sid:2100109;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /command";
+    flow:to_server,established;
+    http_uri;
+    content:"/command",nocase;
+    sid:2100110;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 URI /cmd";
+    flow:to_server,established;
+    http_uri;
+    content:"/cmd",nocase;
+    sid:2100111;
+    rev:1;
+)
+
+# =========================================================
+# 2. Beacon patterns
+# =========================================================
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 beacon status online";
+    flow:to_server,established;
+    http_uri;
+    content:"/beacon.php",nocase;
+    content:"status=online",nocase;
+    sid:2100201;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 beacon with id and online status";
+    flow:to_server,established;
+    http_uri;
+    pcre:"/\/beacon\.php\?id=[A-Za-z0-9_-]+&status=online/i";
+    sid:2100202;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 bot id in URI";
+    flow:to_server,established;
+    http_uri;
+    content:"bot_id=",nocase;
+    sid:2100203;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT C2 victim id in URI";
+    flow:to_server,established;
+    http_uri;
+    content:"victim=",nocase;
+    sid:2100204;
+    rev:1;
+)
+
+# =========================================================
+# 3. Payload download / loader behavior
+# =========================================================
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT payload download URI /download";
+    flow:to_server,established;
+    http_uri;
+    content:"/download",nocase;
+    sid:2100301;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT payload update URI /update";
+    flow:to_server,established;
+    http_uri;
+    content:"/update",nocase;
+    sid:2100302;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT payload URI /payload";
+    flow:to_server,established;
+    http_uri;
+    content:"/payload",nocase;
+    sid:2100303;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT loader URI /loader";
+    flow:to_server,established;
+    http_uri;
+    content:"/loader",nocase;
+    sid:2100304;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT executable download .exe";
+    flow:to_server,established;
+    http_uri;
+    content:".exe",nocase;
+    sid:2100305;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT DLL download .dll";
+    flow:to_server,established;
+    http_uri;
+    content:".dll",nocase;
+    sid:2100306;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT PowerShell script download .ps1";
+    flow:to_server,established;
+    http_uri;
+    content:".ps1",nocase;
+    sid:2100307;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT script download .vbs";
+    flow:to_server,established;
+    http_uri;
+    content:".vbs",nocase;
+    sid:2100308;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT suspicious screen saver payload .scr";
+    flow:to_server,established;
+    http_uri;
+    content:".scr",nocase;
+    sid:2100309;
+    rev:1;
+)
+
+# =========================================================
+# 4. Upload / exfiltration behavior
+# =========================================================
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT exfil URI /upload";
+    flow:to_server,established;
+    http_uri;
+    content:"/upload",nocase;
+    sid:2100401;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT exfil URI /exfil";
+    flow:to_server,established;
+    http_uri;
+    content:"/exfil",nocase;
+    sid:2100402;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT collection URI /collect";
+    flow:to_server,established;
+    http_uri;
+    content:"/collect",nocase;
+    sid:2100403;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT dump URI /dump";
+    flow:to_server,established;
+    http_uri;
+    content:"/dump",nocase;
+    sid:2100404;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT steal URI /steal";
+    flow:to_server,established;
+    http_uri;
+    content:"/steal",nocase;
+    sid:2100405;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT report URI /report";
+    flow:to_server,established;
+    http_uri;
+    content:"/report",nocase;
+    sid:2100406;
+    rev:1;
+)
+
+# =========================================================
+# 5. Suspicious HTTP POST body
+# =========================================================
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT POST body cmd=checkin";
+    flow:to_server,established;
+    http_client_body;
+    content:"cmd=checkin",nocase;
+    sid:2100501;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT POST body command=";
+    flow:to_server,established;
+    http_client_body;
+    content:"command=",nocase;
+    sid:2100502;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT POST body task=";
+    flow:to_server,established;
+    http_client_body;
+    content:"task=",nocase;
+    sid:2100503;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT POST body bot_id=";
+    flow:to_server,established;
+    http_client_body;
+    content:"bot_id=",nocase;
+    sid:2100504;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT POST body hostname=";
+    flow:to_server,established;
+    http_client_body;
+    content:"hostname=",nocase;
+    sid:2100505;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT POST body username=";
+    flow:to_server,established;
+    http_client_body;
+    content:"username=",nocase;
+    sid:2100506;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT POST body token=";
+    flow:to_server,established;
+    http_client_body;
+    content:"token=",nocase;
+    sid:2100507;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT POST body password=";
+    flow:to_server,established;
+    http_client_body;
+    content:"password=",nocase;
+    sid:2100508;
+    rev:1;
+)
+
+# =========================================================
+# 6. Suspicious User-Agent
+# =========================================================
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT User-Agent FakeC2-Agent";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"FakeC2-Agent",nocase;
+    sid:2100601;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT User-Agent PowerShell";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"PowerShell",nocase;
+    sid:2100602;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT User-Agent python-requests";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"python-requests",nocase;
+    sid:2100603;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT User-Agent curl";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"curl",nocase;
+    sid:2100604;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT User-Agent wget";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"wget",nocase;
+    sid:2100605;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT User-Agent Go-http-client";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"Go-http-client",nocase;
+    sid:2100606;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-DETECT User-Agent WinHTTP";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"WinHTTP",nocase;
+    sid:2100607;
+    rev:1;
+)
+
+# =========================================================
+# 7. Suspicious DNS indicators
+# Note: DNS payload contains readable labels, so content matching works for lab.
+# =========================================================
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-DETECT DNS query containing evil";
+    content:"evil",nocase;
+    sid:2100701;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-DETECT DNS query containing c2";
+    content:"c2",nocase;
+    sid:2100702;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-DETECT DNS query containing beacon";
+    content:"beacon",nocase;
+    sid:2100703;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-DETECT DNS query containing botnet";
+    content:"botnet",nocase;
+    sid:2100704;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-DETECT DNS query containing malware";
+    content:"malware",nocase;
+    sid:2100705;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-DETECT DNS query containing payload";
+    content:"payload",nocase;
+    sid:2100706;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-DETECT DNS query containing command";
+    content:"command",nocase;
+    sid:2100707;
+    rev:1;
+)
+
+# =========================================================
+# 8. High-risk outbound protocols in lab
+# These are commonly abused for C2 or exfiltration.
+# =========================================================
+
+alert tcp 192.168.100.0/24 any -> any 6667 (
+    msg:"IDS-DETECT possible IRC C2 outbound";
+    flow:to_server,established;
+    sid:2100801;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any 21 (
+    msg:"IDS-DETECT possible FTP exfil outbound";
+    flow:to_server,established;
+    sid:2100802;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any 25 (
+    msg:"IDS-DETECT possible SMTP exfil outbound";
+    flow:to_server,established;
+    sid:2100803;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any 587 (
+    msg:"IDS-DETECT possible SMTP submission exfil outbound";
+    flow:to_server,established;
+    sid:2100804;
+    rev:1;
+)
+
+
+# Malware custom high-port C2 observed from Windows lab client
+alert tcp 192.168.100.0/24 any -> any [56001,56002,56003] (msg:"LAB-IDS ALERT malware custom C2 high-port traffic 56001-56003"; flow:to_server; sid:2100200; rev:1;)

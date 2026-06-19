@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+import os
+import re
+import sys
+import time
+from pathlib import Path
+from datetime import datetime
+
+DEFAULT_ALERT = "/var/log/snort/alert_fast.txt"
+
+SHOWN = set()
+
+def now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def clean(s):
+    return re.sub(r"\s+", " ", str(s or "")).strip()
+
+def show_once(key):
+    if key in SHOWN:
+        return False
+    SHOWN.add(key)
+    return True
+
+def box(title, rows):
+    w = 96
+    print()
+    print("=" * w)
+    print(title)
+    print("-" * w)
+    for k, v in rows:
+        k = str(k)[:18]
+        v = str(v)
+        prefix = f"{k:<18}: "
+        max_v = w - len(prefix)
+        if len(v) <= max_v:
+            print(prefix + v)
+        else:
+            print(prefix + v[:max_v])
+            rest = v[max_v:]
+            while rest:
+                print(" " * len(prefix) + rest[:max_v])
+                rest = rest[max_v:]
+    print("=" * w, flush=True)
+
+def parse_sid_msg(line):
+    action = ""
+    action_m = re.search(r"\[(drop|alert|block|reject|pass)\]\s+\[\*\*\]", line, re.I)
+    if action_m:
+        action = action_m.group(1).lower()
+
+    m = re.search(r"\[\*\*\]\s+\[(\d+):(\d+):(\d+)\]\s+(.*?)\s+\[\*\*\]", line)
+    if not m:
+        return None
+    return {
+        "gid": m.group(1),
+        "sid": m.group(2),
+        "rev": m.group(3),
+        "msg": clean(m.group(4)),
+        "raw_action": action,
+    }
+
+def parse_class_priority(line):
+    cls = ""
+    pri = ""
+
+    m1 = re.search(r"\[Classification:\s*(.*?)\]", line, re.I)
+    if m1:
+        cls = clean(m1.group(1))
+
+    m2 = re.search(r"\[Priority:\s*(\d+)\]", line, re.I)
+    if m2:
+        pri = m2.group(1)
+
+    return cls, pri
+
+def parse_flow(line):
+    m = re.search(r"\{(\w+)\}\s+([0-9a-fA-F:\.]+)(?::(\d+))?\s+->\s+([0-9a-fA-F:\.]+)(?::(\d+))?", line)
+    if not m:
+        return None
+    return {
+        "proto": m.group(1),
+        "src": m.group(2),
+        "sport": m.group(3) or "",
+        "dst": m.group(4),
+        "dport": m.group(5) or "",
+    }
+
+def infer(msg, dport=""):
+    low = msg.lower()
+
+    if ("observe dns" in low or "allow dns" in low) and "no snort block" in low:
+        return "DNS Request Observed", "No malware behavior observed", "INFO", "T1071.004 DNS"
+
+    if "observe http traffic" in low:
+        return "HTTP Request Allowed", "No malware behavior observed", "INFO", "T1071.001 Web Protocols"
+
+    if "allow icmp" in low or "ping observed" in low:
+        return "ICMP Ping Observed", "No malware behavior observed", "INFO", "Network reachability test"
+
+    if "allow tcp service" in low:
+        return "TCP Service Request Observed", "No malware behavior observed", "INFO", "Permitted service test"
+
+    if "allow udp service" in low:
+        return "UDP Service Request Observed", "No malware behavior observed", "INFO", "Permitted service test"
+
+    if any(x in low for x in ["beacon", "checkin", "heartbeat", "callback", "gate", "malware/c2", "c2 behavior", "correlated http malware"]):
+        return "C2 Beacon / Check-in", "Suspected Trojan / Botnet C2", "HIGH", "T1071.001 Web Protocols"
+
+    if any(x in low for x in ["task", "command", "cmd", "shell", "exec"]):
+        return "Command Retrieval / Remote Control", "Suspected RAT / Trojan", "HIGH", "T1059 / T1071"
+
+    if any(x in low for x in ["payload", "download", "loader", ".exe", ".dll", ".ps1", ".hta", ".scr", ".msi", "powershell"]):
+        return "Payload Download / Script Execution", "Suspected Downloader / Loader Trojan", "HIGH", "T1105 / T1059"
+
+    if any(x in low for x in ["upload", "exfil", "collect", "dump", "steal", "keylog", "password", "token", "wallet", "cookie"]):
+        return "Data Exfiltration / Credential Theft", "Suspected InfoStealer / Trojan", "HIGH", "T1041 / T1555"
+
+    if any(x in low for x in ["dns", "dga", "tunnel", "encoded-looking", "nxdomain"]):
+        return "DGA / DNS Tunneling / Suspicious DNS", "Suspected Botnet / C2 Infrastructure", "MEDIUM", "T1071.004 / T1568"
+
+    if any(x in low for x in ["quic", "udp 443", "http3", "dns-over-tls", "tls", "sni", "encrypted"]):
+        return "Encrypted C2 / Evasion", "Possible Encrypted C2 Channel", "MEDIUM", "T1573 / T1071"
+
+    if "irc" in low or dport == "6667":
+        return "IRC C2", "Suspected Botnet / IRC Trojan", "HIGH", "T1071"
+
+    return "Suspicious Network Activity", "Unknown / Needs correlation", "MEDIUM", "T1071 possible"
+
+def action_from_msg(msg, raw_action=""):
+    low = msg.lower()
+    if raw_action in ["drop", "block", "reject"]:
+        return "BLOCK / DROP"
+    if raw_action == "alert" and any(x in low for x in ["allow", "pass", "observe"]):
+        return "OBSERVED / NO SNORT BLOCK"
+    if raw_action == "alert":
+        return "ALERT / DETECT"
+
+    if any(x in low for x in ["allow", "pass", "observe"]):
+        return "OBSERVED / NO SNORT BLOCK"
+    if any(x in low for x in ["alert", "detect"]):
+        return "ALERT / DETECT"
+    if any(x in low for x in ["pre-block", "block", "drop", "reject"]):
+        return "BLOCK / DROP"
+    return "ALERT / DETECT"
+
+def handle_event(ev):
+    msg = ev.get("msg", "")
+    flow = ev.get("flow", {})
+    dport = flow.get("dport", "")
+    category, suspected, severity, mitre = infer(msg, dport)
+    action = action_from_msg(msg, ev.get("raw_action", ""))
+
+    src = flow.get("src", "")
+    sport = flow.get("sport", "")
+    dst = flow.get("dst", "")
+    proto = flow.get("proto", "")
+    flow_text = "Not parsed"
+    if src and dst:
+        flow_text = f"{src}{(':' + sport) if sport else ''} -> {dst}{(':' + dport) if dport else ''}"
+
+    # Hide normal DNS observe events from Snort pretty view to reduce noise.
+    # Zeek already shows DNS query details better.
+    # DNS block/drop events are still displayed.
+    if action.startswith("OBSERVED") and category == "DNS Request Observed":
+        return
+
+    # For normal observe events, dedupe without source port to avoid repeated Windows retries.
+    if action.startswith("OBSERVED"):
+        flow_key = f"{proto}|{src}->{dst}:{dport}"
+    else:
+        flow_key = flow_text
+
+    key = f"{ev.get('sid')}|{ev.get('rev')}|{msg}|{flow_key}"
+    if not show_once(key):
+        return
+
+    # IMPORTANT:
+    # Do not use: if "BLOCK" in action
+    # because OBSERVED / NO SNORT BLOCK also contains the word BLOCK.
+    is_block = action.startswith("BLOCK") or action.startswith("DROP")
+
+    title = "SNORT IPS BLOCK EVENT" if is_block else "SNORT OBSERVE / ALERT EVENT"
+
+    if is_block:
+        result_text = "Traffic blocked by Snort IPS"
+    elif action.startswith("OBSERVED"):
+        result_text = "Traffic observed/logged only. No Snort block action was taken."
+    else:
+        result_text = "Traffic detected by Snort IDS/IPS rule. No drop action was applied."
+
+    rows = [
+        ("Time", now()),
+        ("Action", action),
+        ("Severity", severity),
+        ("Category", category),
+        ("Suspected type", suspected),
+        ("Rule SID", ev.get("sid", "N/A")),
+        ("Rule REV", ev.get("rev", "N/A")),
+        ("Rule message", msg),
+        ("Classification", ev.get("classification") or "Derived from rule behavior"),
+        ("Priority", ev.get("priority") or "N/A"),
+        ("Protocol", proto or "N/A"),
+        ("Flow", flow_text),
+        ("MITRE", mitre),
+        ("Result", result_text),
+    ]
+    box(title, rows)
+
+def follow(path):
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.touch(exist_ok=True)
+
+    print(f"[SNORT PRETTY VIEW] Watching: {path}", flush=True)
+    print("[SNORT PRETTY VIEW] Snort allow/observe and block events will be displayed.", flush=True)
+    print("[SNORT PRETTY VIEW] Normal lab commands are logged as OBSERVED / NO SNORT BLOCK; malware/C2 matches are BLOCK.", flush=True)
+
+    with open(p, "r", errors="ignore") as f:
+        f.seek(0, os.SEEK_END)
+        ev = None
+
+        while True:
+            line = f.readline()
+
+            if not line:
+                time.sleep(0.2)
+                try:
+                    if p.stat().st_size < f.tell():
+                        f.seek(0, os.SEEK_END)
+                except Exception:
+                    pass
+                continue
+
+            line = line.rstrip("\n")
+            if not line.strip():
+                continue
+
+            sid = parse_sid_msg(line)
+            if sid:
+                if ev and ev.get("msg"):
+                    handle_event(ev)
+                ev = sid
+
+                cls, pri = parse_class_priority(line)
+                if cls:
+                    ev["classification"] = cls
+                if pri:
+                    ev["priority"] = pri
+
+                flow = parse_flow(line)
+                if flow:
+                    ev["flow"] = flow
+                    handle_event(ev)
+                    ev = None
+                continue
+
+            if ev:
+                cls, pri = parse_class_priority(line)
+                if cls:
+                    ev["classification"] = cls
+                if pri:
+                    ev["priority"] = pri
+
+                flow = parse_flow(line)
+                if flow:
+                    ev["flow"] = flow
+                    handle_event(ev)
+                    ev = None
+
+def main():
+    path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_ALERT
+    follow(path)
+
+if __name__ == "__main__":
+    main()

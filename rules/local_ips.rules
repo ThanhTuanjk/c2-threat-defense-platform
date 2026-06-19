@@ -1,0 +1,866 @@
+# =========================================================
+# LAB C2 IPS PRE-BLOCK RULES - SNORT 3 VALID SYNTAX
+# Windows Client: 192.168.100.20
+# Fake C2 Server / INetSim: 10.10.10.20
+#
+# Purpose:
+# - Known C2-like behaviors are blocked immediately.
+# - Unknown behaviors are handled later by Zeek + Python auto rules.
+# =========================================================
+
+# ---------------------------------------------------------
+# 0A. Background allowlist: keep Windows system traffic out of C2 demo blocks
+# ---------------------------------------------------------
+pass tcp 192.168.100.0/24 any -> any any (
+    msg:"LAB-PASS benign Windows Update certificate checks";
+    flow:to_server,established;
+    http_header;
+    content:"Host|3A|",nocase;
+    content:"ctldl.windowsupdate.com",nocase;
+    sid:2099001;
+    rev:1;
+)
+
+pass tcp 192.168.100.0/24 any -> any any (
+    msg:"LAB-PASS benign Microsoft connectivity test";
+    flow:to_server,established;
+    http_header;
+    content:"Host|3A|",nocase;
+    content:"www.msftconnecttest.com",nocase;
+    sid:2099002;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 0. Visibility rule: alert HTTP traffic to Fake C2
+# ---------------------------------------------------------
+alert tcp 192.168.100.0/24 any -> 10.10.10.20 80 (
+    msg:"LAB-IPS OBSERVE HTTP traffic to Fake C2 IP";
+    flow:to_server,established;
+    sid:2100001;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> 10.10.10.20 53 (
+    msg:"LAB-IPS OBSERVE DNS request no Snort block";
+    sid:2100002;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> 10.10.10.20 53 (
+    msg:"LAB-IPS OBSERVE DNS request no Snort block TCP";
+    flow:to_server,established;
+    sid:2100003;
+    rev:1;
+)
+
+alert icmp 192.168.100.0/24 any -> 10.10.10.20 any (
+    msg:"LAB-IPS OBSERVE ICMP ping no Snort block";
+    sid:2100004;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> 10.10.10.20 [21,25,110,143,587,993,995,8080,8443,8888,9001] (
+    msg:"LAB-IPS OBSERVE TCP service request no Snort block";
+    flow:to_server,established;
+    sid:2100005;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> 10.10.10.20 [69,123,500,4500] (
+    msg:"LAB-IPS OBSERVE UDP service request no Snort block";
+    sid:2100006;
+    rev:1;
+)
+
+# =========================================================
+# 1. Known C2 URI / check-in / beacon endpoints
+# =========================================================
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /gate.php";
+    flow:to_server,established;
+    http_uri;
+    content:"/gate.php",nocase;
+    sid:2100101;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /beacon.php";
+    flow:to_server,established;
+    http_uri;
+    content:"/beacon.php",nocase;
+    sid:2100102;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /checkin";
+    flow:to_server,established;
+    http_uri;
+    content:"/checkin",nocase;
+    sid:2100103;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /callback";
+    flow:to_server,established;
+    http_uri;
+    content:"/callback",nocase;
+    sid:2100104;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /connect";
+    flow:to_server,established;
+    http_uri;
+    content:"/connect",nocase;
+    sid:2100105;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /panel";
+    flow:to_server,established;
+    http_uri;
+    content:"/panel",nocase;
+    sid:2100106;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /task";
+    flow:to_server,established;
+    http_uri;
+    content:"/task",nocase;
+    sid:2100107;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /api/task";
+    flow:to_server,established;
+    http_uri;
+    content:"/api/task",nocase;
+    sid:2100108;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /api/checkin";
+    flow:to_server,established;
+    http_uri;
+    content:"/api/checkin",nocase;
+    sid:2100109;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /command";
+    flow:to_server,established;
+    http_uri;
+    content:"/command",nocase;
+    sid:2100110;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 URI /cmd";
+    flow:to_server,established;
+    http_uri;
+    content:"/cmd",nocase;
+    sid:2100111;
+    rev:1;
+)
+
+# =========================================================
+# 2. Beacon patterns
+# =========================================================
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 beacon status online";
+    flow:to_server,established;
+    http_uri;
+    content:"/beacon.php",nocase;
+    content:"status=online",nocase;
+    sid:2100201;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 beacon with id and online status";
+    flow:to_server,established;
+    http_uri;
+    pcre:"/\/beacon\.php\?id=[A-Za-z0-9_-]+&status=online/i";
+    sid:2100202;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 bot id in URI";
+    flow:to_server,established;
+    http_uri;
+    content:"bot_id=",nocase;
+    sid:2100203;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK C2 victim id in URI";
+    flow:to_server,established;
+    http_uri;
+    content:"victim=",nocase;
+    sid:2100204;
+    rev:1;
+)
+
+# =========================================================
+# 3. Payload download / loader behavior
+# =========================================================
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK payload download URI /download";
+    flow:to_server,established;
+    http_uri;
+    content:"/download",nocase;
+    sid:2100301;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK payload update URI /update";
+    flow:to_server,established;
+    http_uri;
+    content:"/update",nocase;
+    sid:2100302;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK payload URI /payload";
+    flow:to_server,established;
+    http_uri;
+    content:"/payload",nocase;
+    sid:2100303;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK loader URI /loader";
+    flow:to_server,established;
+    http_uri;
+    content:"/loader",nocase;
+    sid:2100304;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK executable download .exe";
+    flow:to_server,established;
+    http_uri;
+    content:".exe",nocase;
+    sid:2100305;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK DLL download .dll";
+    flow:to_server,established;
+    http_uri;
+    content:".dll",nocase;
+    sid:2100306;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK PowerShell script download .ps1";
+    flow:to_server,established;
+    http_uri;
+    content:".ps1",nocase;
+    sid:2100307;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK script download .vbs";
+    flow:to_server,established;
+    http_uri;
+    content:".vbs",nocase;
+    sid:2100308;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK suspicious screen saver payload .scr";
+    flow:to_server,established;
+    http_uri;
+    content:".scr",nocase;
+    sid:2100309;
+    rev:1;
+)
+
+# =========================================================
+# 4. Upload / exfiltration behavior
+# =========================================================
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK exfil URI /upload";
+    flow:to_server,established;
+    http_uri;
+    content:"/upload",nocase;
+    sid:2100401;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK exfil URI /exfil";
+    flow:to_server,established;
+    http_uri;
+    content:"/exfil",nocase;
+    sid:2100402;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK collection URI /collect";
+    flow:to_server,established;
+    http_uri;
+    content:"/collect",nocase;
+    sid:2100403;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK dump URI /dump";
+    flow:to_server,established;
+    http_uri;
+    content:"/dump",nocase;
+    sid:2100404;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK steal URI /steal";
+    flow:to_server,established;
+    http_uri;
+    content:"/steal",nocase;
+    sid:2100405;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK report URI /report";
+    flow:to_server,established;
+    http_uri;
+    content:"/report",nocase;
+    sid:2100406;
+    rev:1;
+)
+
+# =========================================================
+# 5. Suspicious HTTP POST body
+# =========================================================
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK POST body cmd=checkin";
+    flow:to_server,established;
+    http_client_body;
+    content:"cmd=checkin",nocase;
+    sid:2100501;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK POST body command=";
+    flow:to_server,established;
+    http_client_body;
+    content:"command=",nocase;
+    sid:2100502;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK POST body task=";
+    flow:to_server,established;
+    http_client_body;
+    content:"task=",nocase;
+    sid:2100503;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK POST body bot_id=";
+    flow:to_server,established;
+    http_client_body;
+    content:"bot_id=",nocase;
+    sid:2100504;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK POST body hostname=";
+    flow:to_server,established;
+    http_client_body;
+    content:"hostname=",nocase;
+    sid:2100505;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK POST body username=";
+    flow:to_server,established;
+    http_client_body;
+    content:"username=",nocase;
+    sid:2100506;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK POST body token=";
+    flow:to_server,established;
+    http_client_body;
+    content:"token=",nocase;
+    sid:2100507;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"PRE-BLOCK POST body password=";
+    flow:to_server,established;
+    http_client_body;
+    content:"password=",nocase;
+    sid:2100508;
+    rev:1;
+)
+
+# =========================================================
+# 6. Suspicious User-Agent
+# =========================================================
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-OBSERVE User-Agent FakeC2-Agent";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"FakeC2-Agent",nocase;
+    sid:2100601;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-OBSERVE User-Agent PowerShell";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"PowerShell",nocase;
+    sid:2100602;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-OBSERVE User-Agent python-requests";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"python-requests",nocase;
+    sid:2100603;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-OBSERVE User-Agent curl";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"curl",nocase;
+    sid:2100604;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-OBSERVE User-Agent wget";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"wget",nocase;
+    sid:2100605;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-OBSERVE User-Agent Go-http-client";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"Go-http-client",nocase;
+    sid:2100606;
+    rev:1;
+)
+
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"IDS-OBSERVE User-Agent WinHTTP";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"WinHTTP",nocase;
+    sid:2100607;
+    rev:1;
+)
+
+# =========================================================
+# 7. Suspicious DNS indicators
+# Note: DNS payload contains readable labels, so content matching works for lab.
+# =========================================================
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-OBSERVE DNS query containing evil";
+    content:"evil",nocase;
+    sid:2100701;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-OBSERVE DNS query containing c2";
+    content:"c2",nocase;
+    sid:2100702;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-OBSERVE DNS query containing beacon";
+    content:"beacon",nocase;
+    sid:2100703;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-OBSERVE DNS query containing botnet";
+    content:"botnet",nocase;
+    sid:2100704;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-OBSERVE DNS query containing malware";
+    content:"malware",nocase;
+    sid:2100705;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-OBSERVE DNS query containing payload";
+    content:"payload",nocase;
+    sid:2100706;
+    rev:1;
+)
+
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"IDS-OBSERVE DNS query containing command";
+    content:"command",nocase;
+    sid:2100707;
+    rev:1;
+)
+
+# =========================================================
+# 8. High-risk outbound protocols in lab
+# These are commonly abused for C2 or exfiltration.
+# =========================================================
+
+block tcp 192.168.100.0/24 any -> any 6667 (
+    msg:"PRE-BLOCK possible IRC C2 outbound";
+    flow:to_server,established;
+    sid:2100801;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any 21 (
+    msg:"PRE-BLOCK possible FTP exfil outbound";
+    flow:to_server,established;
+    sid:2100802;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any 25 (
+    msg:"PRE-BLOCK possible SMTP exfil outbound";
+    flow:to_server,established;
+    sid:2100803;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> any 587 (
+    msg:"PRE-BLOCK possible SMTP submission exfil outbound";
+    flow:to_server,established;
+    sid:2100804;
+    rev:1;
+)
+
+# ===== ENTERPRISE-LITE MALWARE C2 RULE PACK V2 =====
+# Purpose:
+# - Catch common malware C2 behaviors without relying only on obvious lab keywords.
+# - Strong indicators are blocked.
+# - Weak indicators are alerted for correlation.
+
+# ---------------------------------------------------------
+# 1. Common HTTP C2 endpoint names
+# ---------------------------------------------------------
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"ENT-V2 BLOCK common HTTP C2 endpoint";
+    flow:to_server,established;
+    http_uri;
+    pcre:"/\/(gate|gates|beacon|checkin|callback|connect|panel|task|command|cmd|loader|payload|update|upload|exfil|collect|dump|steal|keylog|screenshot)(\.php|\.asp|\.aspx|\.jsp|\.cgi)?(\?|\/|$)/i";
+    sid:2201001;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 2. Suspicious bot/victim identifiers in URI
+# Alert only because some apps use id/token normally.
+# ---------------------------------------------------------
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"ENT-V2 OBSERVE possible bot/victim identifier in HTTP URI";
+    flow:to_server,established;
+    http_uri;
+    pcre:"/[?&](bot|bot_id|victim|hwid|guid|uuid|uid|machine|hostname|username|campaign|session|token|key)=/i";
+    sid:2201002;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 3. PowerShell encoded command in HTTP body
+# ---------------------------------------------------------
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"ENT-V2 BLOCK PowerShell encoded command in HTTP body";
+    flow:to_server,established;
+    http_client_body;
+    pcre:"/(powershell|pwsh).{0,120}(-enc|-encodedcommand|frombase64string|invoke-expression|iex)/i";
+    sid:2201003;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 4. Command/control parameters in HTTP body
+# ---------------------------------------------------------
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"ENT-V2 OBSERVE command-like parameter in HTTP body";
+    flow:to_server,established;
+    http_client_body;
+    pcre:"/(cmd=|command=|exec=|shell=|task=|run=|payload=|download=|upload=)/i";
+    sid:2201004;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 5. Dangerous payload download extensions
+# In malware sandbox, block outbound payload downloads.
+# ---------------------------------------------------------
+block tcp 192.168.100.0/24 any -> any any (
+    msg:"ENT-V2 BLOCK dangerous payload download extension";
+    flow:to_server,established;
+    http_uri;
+    pcre:"/\.(exe|dll|ps1|vbs|vbe|js|jse|hta|bat|cmd|scr|msi|jar|lnk|iso|cab)(\?|$)/i";
+    sid:2201005;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 6. Suspicious automation User-Agent
+# Alert only if standalone.
+# ---------------------------------------------------------
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"ENT-V2 OBSERVE suspicious automation User-Agent";
+    flow:to_server,established;
+    http_header;
+    pcre:"/User-Agent\x3a[^\r\n]*(PowerShell|python-requests|curl|Wget|Go-http-client|WinHTTP|BITS|Microsoft BITS)/i";
+    sid:2201006;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 7. Suspicious UA combined with C2 URI
+# ---------------------------------------------------------
+
+# ---------------------------------------------------------
+# 8. Credential/token/cookie exfil-like body
+# Alert because many apps also send tokens.
+# ---------------------------------------------------------
+alert tcp 192.168.100.0/24 any -> any any (
+    msg:"ENT-V2 OBSERVE possible credential/token exfil in HTTP body";
+    flow:to_server,established;
+    http_client_body;
+    pcre:"/(password=|passwd=|pwd=|token=|access_token=|cookie=|sessionid=|wallet|clipboard|keylog|screenshot)/i";
+    sid:2201008;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 9. Encoded-looking DNS label, possible DGA/DNS tunneling
+# ---------------------------------------------------------
+block udp 192.168.100.0/24 any -> any 53 (
+    msg:"ENT-V2 BLOCK encoded-looking DNS label possible DGA/tunnel";
+    pcre:"/[A-Za-z0-9_-]{32,}\./";
+    sid:2201101;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 10. DNS weak malware words: alert only
+# ---------------------------------------------------------
+alert udp 192.168.100.0/24 any -> any 53 (
+    msg:"ENT-V2 OBSERVE DNS weak malware keyword";
+    pcre:"/(c2|evil|beacon|botnet|malware|payload|command)/i";
+    sid:2201102;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 11. QUIC/HTTP3 UDP 443 can bypass HTTP inspection in sandbox
+# ---------------------------------------------------------
+block udp 192.168.100.0/24 any -> any 443 (
+    msg:"ENT-V2 BLOCK UDP 443 QUIC/HTTP3 possible encrypted C2 bypass";
+    sid:2201201;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 12. DNS-over-TLS port 853
+# ---------------------------------------------------------
+block tcp 192.168.100.0/24 any -> any 853 (
+    msg:"ENT-V2 BLOCK DNS-over-TLS TCP 853";
+    sid:2201202;
+    rev:1;
+)
+
+block udp 192.168.100.0/24 any -> any 853 (
+    msg:"ENT-V2 BLOCK DNS-over-TLS UDP 853";
+    sid:2201203;
+    rev:1;
+)
+
+# ---------------------------------------------------------
+# 13. Non-standard web/C2 ports: alert for correlation
+# ---------------------------------------------------------
+alert tcp 192.168.100.0/24 any -> any [8080,8443,8000,8888,4443,9001] (
+    msg:"ENT-V2 OBSERVE outbound non-standard web/C2 port";
+    flow:to_server,established;
+    sid:2201204;
+    rev:1;
+)
+
+# ===== END ENTERPRISE-LITE MALWARE C2 RULE PACK V2 =====
+
+# ===== FORCE CLEAR IPS TEST RULES =====
+# These rules are explicit and easy to verify during lab testing.
+
+block tcp 192.168.100.0/24 any -> 10.10.10.20 80 (
+    msg:"FORCE-IPS BLOCK C2 Beacon URI /beacon.php";
+    flow:to_server,established;
+    http_uri;
+    content:"/beacon.php",nocase;
+    classtype:trojan-activity;
+    priority:1;
+    sid:2299001;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> 10.10.10.20 80 (
+    msg:"FORCE-IPS BLOCK payload download .exe";
+    flow:to_server,established;
+    http_uri;
+    content:".exe",nocase;
+    classtype:trojan-activity;
+    priority:1;
+    sid:2299002;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> 10.10.10.20 80 (
+    msg:"FORCE-IPS BLOCK C2 checkin URI /checkin";
+    flow:to_server,established;
+    http_uri;
+    content:"/checkin",nocase;
+    classtype:trojan-activity;
+    priority:1;
+    sid:2299003;
+    rev:1;
+)
+
+block tcp 192.168.100.0/24 any -> 10.10.10.20 80 (
+    msg:"FORCE-IPS BLOCK C2 command URI /command";
+    flow:to_server,established;
+    http_uri;
+    content:"/command",nocase;
+    classtype:trojan-activity;
+    priority:1;
+    sid:2299004;
+    rev:1;
+)
+
+# ===== END FORCE CLEAR IPS TEST RULES =====
+
+block tcp 192.168.100.0/24 any -> 10.10.10.20 80 (
+    msg:"IPS-BLOCK Go-http-client generate_204 beacon-like HTTP";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"Go-http-client",nocase;
+    http_uri;
+    content:"/generate_204",nocase;
+    classtype:trojan-activity;
+    sid:2219006;
+    rev:1;
+)
+
+
+# =========================================================
+# Go-http-client direct-IP HTTP request from lab endpoint
+# Broader fallback rule when URI changes
+# =========================================================
+block tcp 192.168.100.0/24 any -> any 80 (
+    msg:"IPS-BLOCK Go-http-client direct-IP HTTP from lab endpoint";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"Go-http-client",nocase;
+    classtype:trojan-activity;
+    sid:2219007;
+    rev:1;
+)
+
+
+# =========================================================
+# IPS Behavioral Rule: Go-http-client repeated generate_204
+# Evidence:
+# - Windows endpoint repeatedly sends HTTP GET /generate_204
+# - User-Agent: Go-http-client/1.1
+# - Repeats within 5 minutes, beacon-like behavior
+# MITRE: T1071.001 Web Protocols
+# =========================================================
+block tcp 192.168.100.0/24 any -> any 56001,56002,56003 (
+    msg:"IPS-BLOCK repeated Go-http-client generate_204 beacon-like HTTP";
+    flow:to_server,established;
+    http_header;
+    content:"User-Agent|3A|",nocase;
+    content:"Go-http-client",nocase;
+    http_uri;
+    content:"/generate_204",nocase;
+    detection_filter:track by_src, count 5, seconds 300;
+    classtype:trojan-activity;
+    sid:2219010;
+    rev:1;
+)
+
+
+# Malware custom high-port C2 observed from Windows lab client
+block tcp 192.168.100.0/24 any -> any [56001,56002,56003] (msg:"LAB-IPS BLOCK malware custom C2 high-port traffic 56001-56003"; flow:to_server; sid:2100200; rev:1;)
+
+# Malware custom high-port C2 repeated beacon rule
+#block tcp 192.168.100.0/24 any -> any 56001:56003 (
+   # msg:"IPS BLOCK repeated high-port C2 beacon 56001-56003";
+   # detection_filter:track by_src, count 5, seconds 300;
+  #  classtype:trojan-activity;
+  #  sid:2100201;
+ #   rev:1;
+#)

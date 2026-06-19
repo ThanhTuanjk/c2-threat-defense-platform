@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+import os
+import re
+import sys
+import time
+from pathlib import Path
+from datetime import datetime
+from collections import deque
+
+SHOWN = set()
+
+def now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def clean(s):
+    return re.sub(r"\s+", " ", str(s or "")).strip()
+
+def box(title, rows):
+    w = 100
+    print()
+    print("=" * w)
+    print(title)
+    print("-" * w)
+    for k, v in rows:
+        k = str(k)[:20]
+        v = str(v)
+        prefix = f"{k:<20}: "
+        max_v = w - len(prefix)
+        if len(v) <= max_v:
+            print(prefix + v)
+        else:
+            print(prefix + v[:max_v])
+            rest = v[max_v:]
+            while rest:
+                print(" " * len(prefix) + rest[:max_v])
+                rest = rest[max_v:]
+    print("=" * w, flush=True)
+
+def parse_event(line):
+    action = ""
+    m_action = re.search(r"\[(drop|alert|block|reject|pass)\]\s+\[\*\*\]", line, re.I)
+    if m_action:
+        action = m_action.group(1).lower()
+
+    m = re.search(r"\[\*\*\]\s+\[(\d+):(\d+):(\d+)\]\s+(.*?)\s+\[\*\*\]", line)
+    if not m:
+        return None
+
+    ev = {
+        "gid": m.group(1),
+        "sid": m.group(2),
+        "rev": m.group(3),
+        "msg": clean(m.group(4)),
+        "raw_action": action,
+        "classification": "",
+        "priority": "",
+        "proto": "",
+        "src": "",
+        "sport": "",
+        "dst": "",
+        "dport": "",
+    }
+
+    m_cls = re.search(r"\[Classification:\s*(.*?)\]", line, re.I)
+    if m_cls:
+        ev["classification"] = clean(m_cls.group(1))
+
+    m_pri = re.search(r"\[Priority:\s*(\d+)\]", line, re.I)
+    if m_pri:
+        ev["priority"] = m_pri.group(1)
+
+    m_flow = re.search(r"\{(\w+)\}\s+([0-9a-fA-F:\.]+)(?::(\d+))?\s+->\s+([0-9a-fA-F:\.]+)(?::(\d+))?", line)
+    if m_flow:
+        ev["proto"] = m_flow.group(1)
+        ev["src"] = m_flow.group(2)
+        ev["sport"] = m_flow.group(3) or ""
+        ev["dst"] = m_flow.group(4)
+        ev["dport"] = m_flow.group(5) or ""
+
+    return ev
+
+def infer(msg, dport=""):
+    low = msg.lower()
+
+    if "observe dns" in low or ("dns request" in low and "no snort block" in low):
+        return "DNS Request Observed", "No malware behavior observed", "INFO", "T1071.004 DNS"
+
+    if "observe http" in low or "http traffic to fake c2" in low:
+        return "HTTP Request Observed", "No malware behavior observed", "INFO", "T1071.001 Web Protocols"
+
+    if "beacon" in low or "checkin" in low or "check-in" in low or "gate" in low or "callback" in low:
+        return "C2 Beacon / Check-in", "Suspected Trojan / Botnet C2", "HIGH", "T1071.001 Web Protocols"
+
+    if "task" in low or "command" in low or "cmd" in low or "shell" in low or "exec" in low:
+        return "Command Retrieval / Remote Control", "Suspected RAT / Trojan", "HIGH", "T1059 / T1071"
+
+    if any(x in low for x in ["payload", "download", "loader", ".exe", ".dll", ".ps1", ".hta", ".scr", ".msi", "powershell", "update"]):
+        return "Payload Download / Script Execution", "Suspected Downloader / Loader Trojan", "HIGH", "T1105 / T1059"
+
+    if any(x in low for x in ["upload", "exfil", "collect", "dump", "steal", "keylog", "password", "token", "wallet", "cookie"]):
+        return "Data Exfiltration / Credential Theft", "Suspected InfoStealer / Trojan", "HIGH", "T1041 / T1555"
+
+    if any(x in low for x in ["dga", "tunnel", "encoded", "nxdomain", "evil", "c2", "malware", "botnet"]):
+        return "Suspicious DNS / C2 Indicator", "Possible Botnet / C2 Infrastructure", "MEDIUM", "T1071.004 / T1568"
+
+    if dport == "6667" or "irc" in low:
+        return "IRC C2", "Suspected Botnet / IRC Trojan", "HIGH", "T1071"
+
+    return "Suspicious Network Activity", "Unknown / Needs correlation", "MEDIUM", "T1071 possible"
+
+def should_hide(ev, category, action):
+    msg = ev.get("msg", "").lower()
+
+    # Hide normal DNS observe to avoid spam.
+    # Zeek terminal shows DNS details better.
+    if action == "OBSERVED / NO BLOCK" and category == "DNS Request Observed":
+        return True
+
+    return False
+
+def handle(ev):
+    msg = ev.get("msg", "")
+    dport = ev.get("dport", "")
+    category, suspected, severity, mitre = infer(msg, dport)
+
+    raw_action = ev.get("raw_action", "")
+    low = msg.lower()
+
+    if "observe" in low or "allow" in low or "no snort block" in low:
+        action = "OBSERVED / NO BLOCK"
+        title = "SNORT IDS OBSERVE EVENT"
+        result = "Traffic observed by Snort IDS. No blocking action is applied."
+        traffic_status = "ALLOWED"
+    else:
+        action = "ALERT ONLY / NO BLOCK"
+        title = "SNORT IDS ALERT EVENT"
+        result = "Threat detected by Snort IDS. Traffic is NOT blocked and is allowed to continue."
+        traffic_status = "ALLOWED"
+
+    if should_hide(ev, category, action):
+        return
+
+    src = ev.get("src", "")
+    sport = ev.get("sport", "")
+    dst = ev.get("dst", "")
+    dport = ev.get("dport", "")
+    proto = ev.get("proto", "")
+
+    if src and dst:
+        flow = f"{src}{(':' + sport) if sport else ''} -> {dst}{(':' + dport) if dport else ''}"
+    else:
+        flow = "Not parsed"
+
+    # Dedupe observe events without source port, but keep alert events by full flow.
+    if action == "OBSERVED / NO BLOCK":
+        key_flow = f"{proto}|{src}->{dst}:{dport}"
+    else:
+        key_flow = flow
+
+    key = f"{ev.get('sid')}|{ev.get('rev')}|{msg}|{key_flow}"
+    if key in SHOWN:
+        return
+    SHOWN.add(key)
+
+    rows = [
+        ("Time", now()),
+        ("Mode", "IDS - Detection Only"),
+        ("Action", action),
+        ("Traffic status", traffic_status),
+        ("Severity", severity),
+        ("Category", category),
+        ("Suspected type", suspected),
+        ("Rule SID", ev.get("sid", "N/A")),
+        ("Rule REV", ev.get("rev", "N/A")),
+        ("Rule message", msg),
+        ("Classification", ev.get("classification") or "Derived from rule behavior"),
+        ("Priority", ev.get("priority") or "N/A"),
+        ("Protocol", proto or "N/A"),
+        ("Flow", flow),
+        ("MITRE", mitre),
+        ("Result", result),
+    ]
+
+    box(title, rows)
+
+
+def replay_recent(path, max_lines=300):
+    p = Path(path)
+    if not p.exists():
+        return
+
+    try:
+        with open(p, "r", errors="ignore") as f:
+            for line in deque(f, maxlen=max_lines):
+                line = line.rstrip("\n")
+                if not line.strip():
+                    continue
+                ev = parse_event(line)
+                if ev:
+                    handle(ev)
+    except Exception:
+        pass
+
+
+def follow_stream(stream):
+    print("[SNORT IDS VIEW] Watching live Snort stream.", flush=True)
+    print("[SNORT IDS VIEW] IDS mode = alert only. No packet blocking is performed.", flush=True)
+    print("[SNORT IDS VIEW] Normal DNS observe is hidden to reduce noise; Zeek shows DNS details.", flush=True)
+
+    for line in stream:
+        line = line.rstrip("\n")
+        if not line.strip():
+            continue
+
+        ev = parse_event(line)
+        if ev:
+            handle(ev)
+
+def follow(path):
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.touch(exist_ok=True)
+
+    print(f"[SNORT IDS VIEW] Watching: {path}", flush=True)
+    print("[SNORT IDS VIEW] IDS mode = alert only. No packet blocking is performed.", flush=True)
+    print("[SNORT IDS VIEW] Normal DNS observe is hidden to reduce noise; Zeek shows DNS details.", flush=True)
+    print("[SNORT IDS VIEW] Replaying recent Snort alerts, then following live.", flush=True)
+
+    replay_recent(path)
+
+    with open(p, "r", errors="ignore") as f:
+        f.seek(0, os.SEEK_END)
+
+        while True:
+            line = f.readline()
+
+            if not line:
+                time.sleep(0.2)
+                try:
+                    if p.stat().st_size < f.tell():
+                        f.seek(0, os.SEEK_END)
+                except Exception:
+                    pass
+                continue
+
+            line = line.rstrip("\n")
+            if not line.strip():
+                continue
+
+            ev = parse_event(line)
+            if ev:
+                handle(ev)
+
+def main():
+    path = sys.argv[1] if len(sys.argv) > 1 else "/var/log/snort_ids/snort_ids_stdout.log"
+    if path in ("-", "stdin", "/dev/stdin"):
+        follow_stream(sys.stdin)
+    else:
+        follow(path)
+
+if __name__ == "__main__":
+    main()
