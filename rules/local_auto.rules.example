@@ -1,1 +1,1 @@
-# Runtime-generated IPS rules go here. Do not commit live local_auto.rules from a real lab.
+# Runtime-generated IPS rules go here. Do not commit live local_auto.rules from a real deployment.

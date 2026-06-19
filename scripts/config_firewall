@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =========================================================
-# FULL C2 DEFENSE LAB NETWORK SCRIPT
+# C2 THREAT DEFENSE PLATFORM NETWORK SCRIPT
 #
 # Mode:
 #   observe = Zeek/INetSim observe only, no Snort IPS NFQUEUE
@@ -65,7 +65,7 @@ if [ -n "${WAZUH_OUT_IF}" ]; then
     sysctl -w net.ipv4.conf.${WAZUH_OUT_IF}.rp_filter=0 2>/dev/null || true
 fi
 
-echo "[+] Flush lab rules"
+echo "[+] Flush platform rules"
 iptables -F FORWARD
 iptables -t nat -F PREROUTING
 iptables -t nat -F POSTROUTING

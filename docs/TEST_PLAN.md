@@ -41,5 +41,5 @@ Expected:
 
 ## No Internet Leak
 
-Confirm unexpected Windows traffic is DNATed to INetSim or dropped/logged by Ubuntu. Use firewall counters and packet capture on the real external path only in a controlled lab.
+Confirm unexpected Windows traffic is DNATed to INetSim or dropped/logged by Ubuntu. Use firewall counters and packet capture on the real external path only in a controlled environment.
 
